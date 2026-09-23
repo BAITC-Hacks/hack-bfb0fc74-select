@@ -411,7 +411,12 @@ def main() -> None:
                 language = st.selectbox("Язык работы (необязательно)", ["Не важно", *languages], key="event_language")
             use_ai = False
             if project_setting("OPENAI_API_KEY"):
-                use_ai = st.checkbox("Улучшить объяснения с AI", value=True, key="use_ai_explanations")
+                use_ai = st.checkbox("Использовать AI для объяснений", value=False, key="ai_opt_in")
+                st.caption(
+                    "При включении в OpenAI передаются ID и описания до трёх выбранных "
+                    "профилей, категория, формат и указанный язык. Имена, цены, даты "
+                    "и календарь занятости не передаются."
+                )
             submitted = st.button("Подобрать подрядчиков  →", type="primary", use_container_width=True, key="submit_match")
             st.caption("Цена указана «от». Отметка о свободной дате в каталоге не является подтверждением бронирования.")
 

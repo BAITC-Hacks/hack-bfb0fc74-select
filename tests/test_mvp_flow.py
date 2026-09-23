@@ -54,6 +54,24 @@ def test_duration_preview_describes_requested_hours(app):
     assert not app.exception
 
 
+def test_ai_with_local_key_requires_explicit_opt_in(monkeypatch, tmp_path):
+    import config
+
+    local_env = tmp_path / ".env"
+    local_env.write_text("OPENAI_API_KEY=fake-test-key\n")
+    monkeypatch.setattr(config, "LOCAL_ENV", local_env)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    ai_app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    ai_toggle = next(item for item in ai_app.checkbox if "AI" in item.label)
+    assert ai_toggle.value is False
+    assert any("в OpenAI передаются ID и описания" in item.value for item in ai_app.caption)
+
+    ai_app.button[0].click().run()
+    assert not ai_app.exception
+    assert any("Объяснения: локальные." in item.value for item in ai_app.caption)
+
+
 def test_sparse_result(app):
     submit(app, category="Флорист", budget=300_000)
     assert len(app.subheader) == 1
