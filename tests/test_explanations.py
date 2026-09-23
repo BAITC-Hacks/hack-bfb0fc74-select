@@ -53,12 +53,15 @@ def test_local_explanations_are_specific_factual_and_stable():
 
 
 def test_empty_result_never_calls_ai(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr("explanations.project_setting", lambda name, default=None: "test")
     assert build_explanations(matched(()), REQUEST, use_ai=True) == ({}, "local")
 
 
 def test_ai_selects_only_literal_evidence_and_preserves_order(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(
+        "explanations.project_setting",
+        lambda name, default=None: "test" if name == "OPENAI_API_KEY" else default,
+    )
     calls = []
 
     class FakeCompletions:
@@ -89,7 +92,10 @@ def test_ai_selects_only_literal_evidence_and_preserves_order(monkeypatch):
 
 
 def test_invalid_ai_evidence_falls_back_for_entire_set(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(
+        "explanations.project_setting",
+        lambda name, default=None: "test" if name == "OPENAI_API_KEY" else default,
+    )
 
     class FakeCompletions:
         def create(self, **kwargs):
@@ -115,7 +121,7 @@ def test_invalid_ai_evidence_falls_back_for_entire_set(monkeypatch):
 
 
 def test_requested_ai_without_key_uses_fallback(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("explanations.project_setting", lambda name, default=None: None)
     explanations, mode = build_explanations(matched(), REQUEST, use_ai=True)
     assert mode == "fallback"
     assert len(explanations) == 2
@@ -145,7 +151,7 @@ def test_demo_host_uses_service_detail_instead_of_introduction():
     assert "Меня зовут" not in texts["HK-44923"]
 
 
-def test_vague_band_description_does_not_add_name_only_evidence():
+def test_vague_band_description_uses_available_stage_detail():
     profiles = load_profiles()
     request = Request("Алматы", date(2026, 9, 24), "корпоратив", "Лайв-бэнд", 800_000)
     result = match(profiles, request)
@@ -153,8 +159,131 @@ def test_vague_band_description_does_not_add_name_only_evidence():
 
     assert mode == "local"
     assert "HK-25279" in texts
+    assert "звуком, энергией и атмосферой" in texts["HK-25279"]
     assert "Crimson Demon Live" not in texts["HK-25279"]
     assert "цена от" in texts["HK-25279"]
+    assert len(re.findall(r"(?<!\d)\.(?!\d)", texts["HK-25279"])) == 2
+
+
+def test_dense_demo_prefers_style_and_service_over_language_list():
+    profiles = load_profiles()
+    request = Request(
+        "Алматы", date(2026, 10, 10), "свадьба", "Ведущий", 2_000_000,
+        language="русский",
+    )
+    result = match(profiles, request)
+    texts, mode = build_explanations(result, request)
+
+    assert mode == "local"
+    assert "HK-77838" in texts and "HK-72938" in texts
+    assert "актёр театра и кино" in texts["HK-77838"]
+    assert "Большая база игр и конкурсов" in texts["HK-72938"]
+    assert "Язык проведения: казахский" not in texts["HK-77838"]
+    assert "Язык ведения:" not in texts["HK-72938"]
+
+
+def test_ai_rejects_language_claim_that_does_not_support_request(monkeypatch):
+    profiles = load_profiles()
+    request = Request(
+        "Алматы", date(2026, 10, 10), "свадьба", "Ведущий", 2_000_000,
+        language="русский",
+    )
+    result = match(profiles, request)
+    monkeypatch.setattr(
+        "explanations.project_setting",
+        lambda name, default=None: "test" if name == "OPENAI_API_KEY" else default,
+    )
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            items = [
+                {
+                    "id": card.id,
+                    "evidence": (
+                        "Язык проведения: казахский" if card.id == "HK-77838"
+                        else _local_evidence(card, result.cards)
+                    ),
+                }
+                for card in result.cards
+            ]
+            return types.SimpleNamespace(choices=[types.SimpleNamespace(
+                message=types.SimpleNamespace(content=json.dumps({"items": items}))
+            )])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = types.SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    texts, mode = build_explanations(result, request, use_ai=True)
+    assert mode == "fallback"
+    assert "актёр театра и кино" in texts["HK-77838"]
+    assert "Язык проведения: казахский" not in texts["HK-77838"]
+
+
+def test_ai_can_use_requested_language_when_source_explicitly_supports_it(monkeypatch):
+    card = next(p for p in load_profiles() if p.id == "HK-72938")
+    request = Request(
+        "Алматы", date(2026, 10, 10), "свадьба", "Ведущий", 2_000_000,
+        language="русский",
+    )
+    monkeypatch.setattr(
+        "explanations.project_setting",
+        lambda name, default=None: "test" if name == "OPENAI_API_KEY" else default,
+    )
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            content = json.dumps({"items": [{
+                "id": card.id, "evidence": "Язык ведения: казахский, русский",
+            }]})
+            return types.SimpleNamespace(choices=[types.SimpleNamespace(
+                message=types.SimpleNamespace(content=content)
+            )])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = types.SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    texts, mode = build_explanations(matched((card,)), request, use_ai=True)
+    assert mode == "ai"
+    assert "Язык ведения: казахский, русский" in texts[card.id]
+
+
+def test_ai_rejects_bare_introduction_when_service_detail_exists(monkeypatch):
+    profiles = load_profiles()
+    request = Request("Алматы", date(2026, 10, 11), "свадьба", "Ведущий", 2_000_000)
+    result = match(profiles, request)
+    monkeypatch.setattr(
+        "explanations.project_setting",
+        lambda name, default=None: "test" if name == "OPENAI_API_KEY" else default,
+    )
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            items = [
+                {
+                    "id": card.id,
+                    "evidence": (
+                        "Меня зовут Мицури Канроджи – я профессиональный ведущий и сценарист"
+                        if card.id == "HK-44923" else _local_evidence(card, result.cards)
+                    ),
+                }
+                for card in result.cards
+            ]
+            return types.SimpleNamespace(choices=[types.SimpleNamespace(
+                message=types.SimpleNamespace(content=json.dumps({"items": items}))
+            )])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = types.SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    texts, mode = build_explanations(result, request, use_ai=True)
+    assert mode == "fallback"
+    assert "разработаем ОРИГИНАЛЬНЫЙ сценарий" in texts["HK-44923"]
 
 
 def test_source_excerpt_is_literal_and_not_clipped_for_all_profiles():

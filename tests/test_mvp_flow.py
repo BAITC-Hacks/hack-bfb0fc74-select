@@ -36,6 +36,24 @@ def test_three_cards_and_date_change(app):
     assert any("заняты" in item.value for item in app.info)
 
 
+def test_date_comparison_distinguishes_top_three_from_busy(app):
+    submit(app, day=date(2026, 10, 10))
+    submit(app, day=date(2026, 10, 11))
+    comparison = " ".join(item.value for item in app.info)
+    assert "не вошли в новую тройку: Хаул, Софи Хаттер" in comparison
+    assert "вошли в новую тройку: Эмилия, Мицури Канроджи" in comparison
+    assert "были заняты на прежнюю дату: Эмилия, Мицури Канроджи" in comparison
+    assert "заняты на новую дату: Хаул" not in comparison
+
+
+def test_duration_preview_describes_requested_hours(app):
+    app.number_input[1].set_value(8)
+    app.run()
+    preview = " ".join(item.value for item in app.get("html"))
+    assert "Длительность: требуется 8 ч" in preview
+    assert not app.exception
+
+
 def test_sparse_result(app):
     submit(app, category="Флорист", budget=300_000)
     assert len(app.subheader) == 1

@@ -192,9 +192,9 @@ def show_date_comparison(result, request: Request, profiles) -> None:
             ]
             details = []
             if removed_names:
-                details.append("выбыли: " + ", ".join(removed_names))
+                details.append("не вошли в новую тройку: " + ", ".join(removed_names))
             if added_names:
-                details.append("появились: " + ", ".join(added_names))
+                details.append("вошли в новую тройку: " + ", ".join(added_names))
             if now_busy:
                 details.append("заняты на новую дату: " + ", ".join(now_busy))
             if previously_busy:
@@ -430,7 +430,7 @@ def main() -> None:
             safe_date = selected_date.strftime("%d.%m.%Y")
             safe_budget = escape(money(int(budget)))
             language_value = "Любой язык" if language == "Не важно" else language
-            duration_value = "не задана" if not duration else f"до {int(duration)} ч"
+            duration_value = "не задана" if not duration else f"требуется {int(duration)} ч"
             st.html(
                 f'''<div class="preview-grid">
                   <div class="preview-item"><div class="preview-item-head">{summary_icon("format")}<span class="preview-label">Формат</span></div><div class="preview-value">{safe_format}</div></div>

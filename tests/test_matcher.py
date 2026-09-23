@@ -40,6 +40,22 @@ def test_dense_date_shift_is_real_and_deterministic(profiles):
     assert october_11 == match(profiles, query("2026-10-11"))
 
 
+def test_toy_ranking_requires_actual_word_mention(profiles):
+    request = query("2026-09-23", event_format="той", budget=10_000_000)
+    result = match(profiles, request)
+    # HK-27222 contains «постоянным», whose internal «тоя» used to earn a
+    # false format boost over the cheaper HK-42352.
+    assert "постоянным" in next(p for p in profiles if p.id == "HK-27222").description
+    assert [card.id for card in result.cards] == ["HK-42352", "HK-27222", "HK-72938"]
+    assert result == match(tuple(reversed(profiles)), request)
+
+    # A real standalone word should still count as format evidence.
+    source = next(p for p in profiles if p.id == "HK-27222")
+    with_mention = replace(source, description="Проводит той в Алматы. " + source.description)
+    modified = tuple(with_mention if p.id == source.id else p for p in profiles)
+    assert match(modified, request).cards[0].id == source.id
+
+
 def test_sparse_and_empty_states(profiles):
     sparse = match(profiles, query("2026-10-10", category="Флорист", budget=300_000))
     assert sparse.status == "matched"

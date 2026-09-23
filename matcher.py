@@ -6,6 +6,7 @@ duration. Ranking is a documented heuristic, never a quality rating.
 """
 
 import csv
+import re
 from datetime import date
 from pathlib import Path
 
@@ -109,7 +110,13 @@ def load_profiles(path: str | Path = "data/contractors.csv") -> tuple[Profile, .
 
 def _format_mentioned(profile: Profile, event_format: str) -> bool:
     text = profile.description.casefold()
-    return any(term in text for term in FORMAT_TERMS.get(event_format, (event_format.casefold(),)))
+    terms = FORMAT_TERMS.get(event_format, (event_format.casefold(),))
+    if event_format == "той":
+        # These are complete word forms. Substring search wrongly treats
+        # «постоянным» (тоя) and «юртой» (той) as event-format evidence.
+        return any(re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text) for term in terms)
+    # Other entries are stems (свадьб-, корпорат-, etc.) and can have endings.
+    return any(re.search(rf"(?<!\w){re.escape(term)}", text) for term in terms)
 
 
 def match(profiles: tuple[Profile, ...], request: Request) -> MatchResult:
