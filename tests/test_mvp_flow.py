@@ -65,7 +65,10 @@ def test_ai_with_local_key_requires_explicit_opt_in(monkeypatch, tmp_path):
     ai_app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
     ai_toggle = next(item for item in ai_app.checkbox if "AI" in item.label)
     assert ai_toggle.value is False
-    assert any("в OpenAI передаются ID и описания" in item.value for item in ai_app.caption)
+    assert any(
+        "в OpenAI передаются ID и проверенные фрагменты описаний" in item.value
+        for item in ai_app.caption
+    )
 
     ai_app.button[0].click().run()
     assert not ai_app.exception
