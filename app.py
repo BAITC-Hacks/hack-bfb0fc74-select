@@ -266,15 +266,23 @@ def city_illustration_svg(city: str) -> str:
 
 
 def render_city_illustration(city: str) -> None:
-    """Show generated city art when available, with an inline fallback for abroad."""
-    image_names = {"Астана": "astana.png", "Алматы": "almaty.png"}
+    """Show the matching direction image, with an inline fallback."""
+    image_names = {
+        "Астана": "astana.png",
+        "Алматы": "almaty.png",
+        "Зарубежье": "abroad.png",
+    }
     image_name = image_names.get(city)
     image_path = Path(__file__).parent / "assets" / "cities" / image_name if image_name else None
     if image_path and image_path.is_file():
         source = b64encode(image_path.read_bytes()).decode("ascii")
+        alt = (
+            'Изображение направления «Зарубежье»'
+            if city == "Зарубежье" else f"Иллюстрация города {escape(city)}"
+        )
         st.html(
             f'<img class="city-art" src="data:image/png;base64,{source}" '
-            f'alt="Иллюстрация города {escape(city)}">'
+            f'alt="{alt}">'
         )
     else:
         source = b64encode(city_illustration_svg(city).encode("utf-8")).decode("ascii")
@@ -424,7 +432,7 @@ def main() -> None:
                 language = st.selectbox("Язык работы (необязательно)", ["Не важно", *languages], key="event_language")
             use_ai = False
             if project_setting("OPENAI_API_KEY"):
-                use_ai = st.checkbox("Использовать AI для объяснений", value=False, key="ai_opt_in")
+                use_ai = st.checkbox("AI: выбрать деталь для объяснения", value=False, key="ai_opt_in")
                 st.caption(
                     "AI выбирает деталь из описания для объяснения; отбор и порядок подрядчиков "
                     "определяются локальными правилами. "
