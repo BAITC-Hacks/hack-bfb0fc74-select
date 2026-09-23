@@ -145,6 +145,18 @@ def test_demo_host_uses_service_detail_instead_of_introduction():
     assert "Меня зовут" not in texts["HK-44923"]
 
 
+def test_vague_band_description_does_not_add_name_only_evidence():
+    profiles = load_profiles()
+    request = Request("Алматы", date(2026, 9, 24), "корпоратив", "Лайв-бэнд", 800_000)
+    result = match(profiles, request)
+    texts, mode = build_explanations(result, request)
+
+    assert mode == "local"
+    assert "HK-25279" in texts
+    assert "Crimson Demon Live" not in texts["HK-25279"]
+    assert "цена от" in texts["HK-25279"]
+
+
 def test_source_excerpt_is_literal_and_not_clipped_for_all_profiles():
     profiles = load_profiles()
     assert len(profiles) == 66

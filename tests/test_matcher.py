@@ -5,7 +5,7 @@ from datetime import date
 
 import pytest
 
-from matcher import FIRST_DATE, LAST_DATE, load_profiles, match
+from matcher import FIRST_DATE, LAST_DATE, build_match_reasons, load_profiles, match
 from models import Request
 
 
@@ -97,3 +97,73 @@ def test_invalid_csv_rejected(tmp_path):
     source.write_text("id,wrong\n1,2\n", encoding="utf-8")
     with pytest.raises(ValueError, match="headers"):
         load_profiles(source)
+
+
+def test_structured_reasons_follow_cards_and_source_fields(profiles):
+    request = query("2026-10-11", language="русский", duration=4)
+    result = match(profiles, request)
+    reasons = build_match_reasons(result, request)
+    assert tuple(reasons) == tuple(card.id for card in result.cards)
+    assert 0 < len(reasons) <= 3
+    for card in result.cards:
+        by_field = {check["field"]: check for check in reasons[card.id]}
+        assert by_field["city"] == {"field": "city", "operator": "eq",
+                                    "actual": card.city, "requested": request.city}
+        assert by_field["categories"]["actual"] == card.categories
+        assert by_field["busy_dates"] == {
+            "field": "busy_dates", "operator": "not_contains", "actual": True,
+            "requested": request.date.isoformat(),
+        }
+        assert by_field["price_from_kzt"]["actual"] <= request.budget_kzt
+        assert request.event_format in by_field["event_formats"]["actual"]
+        assert request.language in by_field["languages"]["actual"]
+        assert by_field["max_hours"]["actual"] >= request.duration_hours
+
+
+def test_reasons_handle_sparse_empty_and_synthetic(profiles):
+    sparse_request = query("2026-10-10", category="Флорист", budget=300_000,
+                           duration=100)
+    sparse = match(profiles, sparse_request)
+    assert len(sparse.cards) == 1
+    assert "max_hours" not in {
+        check["field"] for check in build_match_reasons(sparse, sparse_request)[sparse.cards[0].id]
+    }
+    empty_request = query("2026-10-10", budget=100_000)
+    assert build_match_reasons(match(profiles, empty_request), empty_request) == {}
+
+    synthetic = next(card for card in profiles if card.synthetic)
+    free_day = next(day for day in (FIRST_DATE, LAST_DATE) if day not in synthetic.busy_dates)
+    request = Request(synthetic.city, free_day, synthetic.event_formats[0],
+                      synthetic.categories[0], synthetic.price_from_kzt)
+    result = match((synthetic,), request)
+    assert result.cards[0].synthetic is True
+    assert build_match_reasons(result, request)[synthetic.id]
+
+
+def test_reasons_reject_mismatched_request(profiles):
+    request = query("2026-10-11")
+    result = match(profiles, request)
+    with pytest.raises(ValueError, match="does not satisfy"):
+        build_match_reasons(result, replace(request, city="Астана"))
+
+
+def test_empty_language_matches_unspecified_language_in_reasons(profiles):
+    request = query("2026-10-11", language="")
+    unspecified = replace(request, language=None)
+    result = match(profiles, request)
+    assert result == match(profiles, unspecified)
+    assert build_match_reasons(result, request) == build_match_reasons(result, unspecified)
+    assert all(check["field"] != "languages"
+               for checks in build_match_reasons(result, request).values()
+               for check in checks)
+
+
+@pytest.mark.parametrize("city,category,event_format", [
+    (" ", "Ведущий", "свадьба"),
+    ("Алматы", " ", "свадьба"),
+    ("Алматы", "Ведущий", " "),
+])
+def test_whitespace_required_fields_rejected(profiles, city, category, event_format):
+    with pytest.raises(ValueError, match="required"):
+        match(profiles, query("2026-10-11", city=city, category=category,
+                              event_format=event_format))

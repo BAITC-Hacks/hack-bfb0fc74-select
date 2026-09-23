@@ -122,7 +122,8 @@ def match(profiles: tuple[Profile, ...], request: Request) -> MatchResult:
         not isinstance(request.duration_hours, int) or request.duration_hours <= 0
     ):
         raise ValueError("Duration must be a positive number of hours")
-    if not all((request.city, request.category, request.event_format)):
+    if any(not isinstance(value, str) or not value.strip()
+           for value in (request.city, request.category, request.event_format)):
         raise ValueError("City, category, and event format are required")
 
     in_category = [
@@ -161,3 +162,49 @@ def match(profiles: tuple[Profile, ...], request: Request) -> MatchResult:
         category_count=len(in_category),
         exclusion_counts=exclusions,
     )
+
+
+def build_match_reasons(
+    result: MatchResult, request: Request
+) -> dict[str, tuple[dict[str, object], ...]]:
+    """Return source-field checks for each selected card, in card order.
+
+    This is an additive machine-readable companion to ``match``. It does not
+    change the agreed ``MatchResult`` contract or use description text as an
+    eligibility claim. The optional duration check is omitted when max_hours
+    is empty in the source data, since that limit does not apply there.
+    """
+    reasons = {}
+    for profile in result.cards:
+        if (profile.city != request.city
+                or request.category not in profile.categories
+                or request.date in profile.busy_dates
+                or profile.price_from_kzt > request.budget_kzt
+                or request.event_format not in profile.event_formats
+                or (request.language and request.language not in profile.languages)
+                or (request.duration_hours is not None
+                    and profile.max_hours is not None
+                    and profile.max_hours < request.duration_hours)):
+            raise ValueError(f"Card {profile.id} does not satisfy the request")
+
+        checks: list[dict[str, object]] = [
+            {"field": "city", "operator": "eq", "actual": profile.city,
+             "requested": request.city},
+            {"field": "categories", "operator": "contains", "actual": profile.categories,
+             "requested": request.category},
+            {"field": "busy_dates", "operator": "not_contains",
+             "actual": request.date not in profile.busy_dates,
+             "requested": request.date.isoformat()},
+            {"field": "price_from_kzt", "operator": "lte",
+             "actual": profile.price_from_kzt, "requested": request.budget_kzt},
+            {"field": "event_formats", "operator": "contains",
+             "actual": profile.event_formats, "requested": request.event_format},
+        ]
+        if request.language:
+            checks.append({"field": "languages", "operator": "contains",
+                           "actual": profile.languages, "requested": request.language})
+        if request.duration_hours is not None and profile.max_hours is not None:
+            checks.append({"field": "max_hours", "operator": "gte",
+                           "actual": profile.max_hours, "requested": request.duration_hours})
+        reasons[profile.id] = tuple(checks)
+    return reasons

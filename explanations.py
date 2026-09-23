@@ -84,8 +84,12 @@ def _local_evidence(profile: Profile, peers: tuple[Profile, ...] = ()) -> str:
         value -= 4 * generic + 12 * repeated + 5 * name_only
         return value, min(len(candidate), 130)
 
-    # Python's max keeps the first source phrase on an exact tie.
-    return max(candidates, key=score)
+    # Python's max keeps the first source phrase on an exact tie. A bare
+    # self-introduction adds no useful detail beyond the verified CSV facts.
+    best = max(candidates, key=score)
+    if re.match(r"^мы\s*[—–-]\s*", best, re.IGNORECASE) and score(best)[0] <= 0:
+        return ""
+    return best
 
 
 def _factual_sentence(profile: Profile, request: Request) -> str:
