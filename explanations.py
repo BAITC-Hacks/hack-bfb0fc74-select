@@ -7,9 +7,9 @@ cannot change eligibility, order, or the factual sentence built from CSV fields.
 from __future__ import annotations
 
 import json
-import os
 import re
 
+from config import project_setting
 from models import MatchResult, Profile, Request
 
 
@@ -118,7 +118,10 @@ def _compose(profile: Profile, request: Request, evidence: str) -> str:
 def _ai_evidence(cards: tuple[Profile, ...], request: Request) -> dict[str, str]:
     from openai import OpenAI  # Optional dependency, imported only in AI mode.
 
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=5.0, max_retries=0)
+    api_key = project_setting("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OpenAI API key is not configured")
+    client = OpenAI(api_key=api_key, timeout=5.0, max_retries=0)
     payload = [
         {
             "id": card.id,
@@ -129,7 +132,7 @@ def _ai_evidence(cards: tuple[Profile, ...], request: Request) -> dict[str, str]
         for card in cards
     ]
     completion = client.chat.completions.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        model=project_setting("OPENAI_MODEL", "gpt-4.1-mini"),
         temperature=0,
         response_format={"type": "json_object"},
         messages=[
@@ -190,7 +193,7 @@ def build_explanations(
     evidence = {card.id: _local_evidence(card, cards) for card in cards}
     if use_ai:
         mode = "fallback"
-        if os.getenv("OPENAI_API_KEY"):
+        if project_setting("OPENAI_API_KEY"):
             try:
                 evidence = _ai_evidence(cards, request)
                 mode = "ai"

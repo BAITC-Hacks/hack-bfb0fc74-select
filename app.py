@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from base64 import b64encode
 from html import escape
 from datetime import date
@@ -10,6 +9,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from config import project_setting
 from models import Request
 
 
@@ -410,7 +410,7 @@ def main() -> None:
                 duration = st.number_input("Длительность, часы (0 — не учитывать)", min_value=0, max_value=48, value=0, step=1, key="event_duration")
                 language = st.selectbox("Язык работы (необязательно)", ["Не важно", *languages], key="event_language")
             use_ai = False
-            if os.getenv("OPENAI_API_KEY"):
+            if project_setting("OPENAI_API_KEY"):
                 use_ai = st.checkbox("Улучшить объяснения с AI", value=True, key="use_ai_explanations")
             submitted = st.button("Подобрать подрядчиков  →", type="primary", use_container_width=True, key="submit_match")
             st.caption("Цена указана «от». Отметка о свободной дате в каталоге не является подтверждением бронирования.")
