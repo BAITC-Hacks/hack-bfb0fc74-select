@@ -1,9 +1,11 @@
 import json
+import re
 import sys
 import types
 from datetime import date
 
-from explanations import build_explanations
+from explanations import _compose, _local_evidence, _normalize, build_explanations
+from matcher import load_profiles, match
 from models import MatchResult, Profile, Request
 
 
@@ -117,3 +119,48 @@ def test_requested_ai_without_key_uses_fallback(monkeypatch):
     explanations, mode = build_explanations(matched(), REQUEST, use_ai=True)
     assert mode == "fallback"
     assert len(explanations) == 2
+
+
+def test_equal_price_bands_get_distinct_source_facts():
+    profiles = load_profiles()
+    request = Request("Алматы", date(2026, 9, 23), "юбилей", "Лайв-бэнд", 1_150_000)
+    result = match(profiles, request)
+    texts, mode = build_explanations(result, request)
+
+    assert mode == "local"
+    assert [card.id for card in result.cards] == ["HK-23752", "HK-31819", "HK-83709"]
+    assert "два вокалиста" in texts["HK-23752"]
+    assert "4 вокалиста, струнный квартет" in texts["HK-83709"]
+    assert texts["HK-23752"] != texts["HK-83709"]
+
+
+def test_demo_host_uses_service_detail_instead_of_introduction():
+    profiles = load_profiles()
+    request = Request("Алматы", date(2026, 10, 11), "свадьба", "Ведущий", 2_000_000)
+    result = match(profiles, request)
+    texts, _ = build_explanations(result, request)
+
+    assert "HK-44923" in texts
+    assert "разработаем ОРИГИНАЛЬНЫЙ сценарий" in texts["HK-44923"]
+    assert "Меня зовут" not in texts["HK-44923"]
+
+
+def test_source_excerpt_is_literal_and_not_clipped_for_all_profiles():
+    profiles = load_profiles()
+    assert len(profiles) == 66
+    for card in profiles:
+        excerpt = _local_evidence(card)
+        assert excerpt in _normalize(card.description), card.id
+        assert not excerpt.endswith("…"), card.id
+    by_id = {card.id: card for card in profiles}
+    assert "Финалист премии" in _local_evidence(by_id["HK-26808"])
+    assert "Меня зовут" not in _local_evidence(by_id["HK-61323"])
+
+
+def test_nested_source_quotes_remain_readable_and_two_sentences():
+    card = profile("QUOTED", "«Rurouni Sound» – группа с двумя вокалистами и саксофоном.")
+    request = Request("Алматы", date(2026, 10, 10), "свадьба", "Флорист", 500_000)
+    text = _compose(card, request, "«Rurouni Sound» – группа с двумя вокалистами и саксофоном")
+    assert "„«Rurouni Sound» – группа" in text
+    assert text.endswith("саксофоном“.")
+    assert len(re.findall(r"(?<!\d)\.(?!\d)", text)) == 2

@@ -84,10 +84,16 @@ def show_result(result, request: Request, profiles, use_ai: bool) -> None:
         # The selection must remain usable when the optional explanation service fails.
         explanations, mode = build_explanations(result, request, use_ai=False)
 
-    st.success(
-        f"Подобрано {len(result.cards)} из {result.eligible_count} подходящих "
-        f"подрядчиков на {request.date:%d.%m.%Y}."
-    )
+    if result.eligible_count == 1:
+        summary = f"Найден 1 подходящий подрядчик на {request.date:%d.%m.%Y}."
+    elif result.eligible_count == 2:
+        summary = f"Найдены 2 подходящих подрядчика на {request.date:%d.%m.%Y}."
+    else:
+        summary = (
+            f"Подобрано {len(result.cards)} из {result.eligible_count} подходящих "
+            f"подрядчиков на {request.date:%d.%m.%Y}."
+        )
+    st.success(summary)
     mode_label = {
         "ai": "AI",
         "openai": "AI",
@@ -108,14 +114,19 @@ def show_result(result, request: Request, profiles, use_ai: bool) -> None:
                 st.caption(" · ".join(flags))
 
     if result.eligible_count < 3:
+        count_phrase = (
+            "Показан 1 подходящий вариант"
+            if result.eligible_count == 1
+            else "Показаны 2 подходящих варианта"
+        )
         if result.eligible_count == result.category_count:
             st.info(
-                f"Показаны все {result.eligible_count} подходящих: в этом городе "
+                f"{count_phrase}: в этом городе "
                 "больше профилей данной категории нет."
             )
         else:
             st.info(
-                f"Показаны все {result.eligible_count} подходящих: остальные профили этой "
+                f"{count_phrase}: остальные профили этой "
                 "категории не прошли ограничения запроса."
             )
         show_exclusions(result)

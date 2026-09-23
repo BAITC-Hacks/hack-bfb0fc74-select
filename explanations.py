@@ -15,38 +15,77 @@ from models import MatchResult, Profile, Request
 
 _WHITESPACE = re.compile(r"\s+")
 _SENTENCE_BREAK = re.compile(r"[.!?;\n•]+")
+_LIST_BREAK = re.compile(
+    r"\s+(?=(?:Финалист|Резидент|Ведущий проекта|Организатор|"
+    r"Участник|Сценарист команды|Расширенный состав|Большой музыкальный состав|"
+    r"Репертуар включает)\s)", re.IGNORECASE
+)
+_CONCRETE_TERMS = (
+    "сценар", "импровизац", "репертуар", "состав", "вокал", "саксофон",
+    "труб", "барабан", "струнн", "перкус", "съём", "съем", "монтаж",
+    "светов", "фотозон", "арки", "букет", "цветоч", "печать", "интерактив",
+    "джаз", "казахск", "свадеб", "церемон", "декор", "оборудован",
+    "панорам", "зал", "кухн", "лет", "проект", "конференц", "ретро",
+    "финалист", "преми", "резидент", "топ 5", "рейтинг", "кадр",
+)
+_GENERIC_TERMS = (
+    "меня зовут", "приветствую", "профессиональный", "профессиональная",
+    "команда профессионалов", "один из лучших", "самых востребованных",
+    "незабываем", "любой формат", "атмосфер", "тонким чувством",
+    "не сомневаться", "особое", "любим", "креативный подход",
+)
 
 
 def _normalize(value: str) -> str:
     return _WHITESPACE.sub(" ", value).strip()
 
 
-def _local_evidence(profile: Profile) -> str:
-    """Choose a concise, literal detail from the description."""
+def _candidate_phrases(description: str) -> tuple[str, ...]:
+    """Extract literal phrases without rewriting or adding ellipses."""
+    phrases: list[str] = []
+    for part in _SENTENCE_BREAK.split(description):
+        for section in _LIST_BREAK.split(part):
+            clause = _normalize(section).strip(' \"-–—:,')
+            if not clause:
+                continue
+            if len(clause) > 170:
+                experience = re.match(r".{20,90}?\b\d+\s+лет\b", clause, re.IGNORECASE)
+                if experience:
+                    phrases.append(experience.group(0))
+                # An unpunctuated description may contain several claims.
+                # Keep only a complete comma-delimited opening if available.
+                opening = clause[:170].rsplit(",", 1)[0].strip()
+                if 25 <= len(opening) <= 150:
+                    phrases.append(opening)
+                continue
+            if len(clause) >= 20:
+                phrases.append(clause)
+    return tuple(dict.fromkeys(phrases))
+
+
+def _local_evidence(profile: Profile, peers: tuple[Profile, ...] = ()) -> str:
+    """Prefer a concrete and distinctive literal detail from the description."""
     description = _normalize(profile.description)
-    clauses = (_normalize(part).strip(' «»\"-–—:') for part in _SENTENCE_BREAK.split(description))
-    for clause in clauses:
-        if 30 <= len(clause) <= 170 and len(clause.split()) >= 5:
-            return clause
-        if len(clause) > 170 and len(clause.split()) >= 5:
-            experience = re.match(r".{20,90}?\b\d+\s+лет\b", clause, re.IGNORECASE)
-            if experience:
-                return experience.group(0)
-            words = clause.split()
-            excerpt = ""
-            for word in words:
-                if len(excerpt) + len(word) + 1 > 110:
-                    break
-                excerpt = f"{excerpt} {word}".strip()
-            if len(excerpt) >= 30:
-                excerpt = re.sub(
-                    r"\s+(?:и|с|в|на|по|для|от|до|а|но)$", "", excerpt,
-                    flags=re.IGNORECASE,
-                )
-                return excerpt + "…"
-    # Some source descriptions are brief or punctuation-heavy. A literal
-    # fragment remains safer than inventing a selling point.
-    return description[:140].rsplit(" ", 1)[0].strip(' «»\"-–—:,.')
+    candidates = _candidate_phrases(description)
+    if not candidates:
+        return description
+
+    peer_descriptions = tuple(
+        _normalize(peer.description) for peer in peers if peer.id != profile.id
+    )
+
+    def score(candidate: str) -> tuple[int, int]:
+        lowered = candidate.casefold()
+        concrete = sum(term in lowered for term in _CONCRETE_TERMS)
+        generic = sum(term in lowered for term in _GENERIC_TERMS)
+        repeated = any(candidate in other for other in peer_descriptions)
+        name_only = profile.anon_name.casefold() in lowered and concrete == 0
+        value = 3 * concrete + min(len(re.findall(r"\d+", candidate)), 2)
+        value -= 4 * generic + 12 * repeated + 5 * name_only
+        return value, min(len(candidate), 130)
+
+    # Python's max keeps the first source phrase on an exact tie.
+    return max(candidates, key=score)
 
 
 def _factual_sentence(profile: Profile, request: Request) -> str:
@@ -66,9 +105,9 @@ def _factual_sentence(profile: Profile, request: Request) -> str:
 
 def _compose(profile: Profile, request: Request, evidence: str) -> str:
     factual = _factual_sentence(profile, request)
-    detail = _normalize(evidence).strip(' «»\"-–—:,.')
+    detail = _normalize(evidence)
     if detail:
-        return f"{factual} В описании профиля указано: «{detail}»."
+        return f"{factual} В описании профиля указано: „{detail}“."
     return factual
 
 
@@ -144,7 +183,7 @@ def build_explanations(
         return {}, "local"
 
     mode = "local"
-    evidence = {card.id: _local_evidence(card) for card in cards}
+    evidence = {card.id: _local_evidence(card, cards) for card in cards}
     if use_ai:
         mode = "fallback"
         if os.getenv("OPENAI_API_KEY"):

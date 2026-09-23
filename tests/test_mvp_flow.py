@@ -39,7 +39,15 @@ def test_three_cards_and_date_change(app):
 def test_sparse_result(app):
     submit(app, category="Флорист", budget=300_000)
     assert len(app.subheader) == 1
-    assert any("Показаны все 1" in item.value for item in app.info)
+    assert any("Показан 1 подходящий вариант" in item.value for item in app.info)
+    assert any("Найден 1 подходящий подрядчик" in item.value for item in app.success)
+
+
+def test_two_results_use_natural_russian(app):
+    submit(app, category="Банкетный зал", budget=6_000_000, day=date(2026, 11, 14))
+    assert len(app.subheader) == 2
+    assert any("Показаны 2 подходящих варианта" in item.value for item in app.info)
+    assert any("Найдены 2 подходящих подрядчика" in item.value for item in app.success)
 
 
 @pytest.mark.parametrize("city,category,budget,message", [
@@ -50,6 +58,7 @@ def test_distinct_empty_states(app, city, category, budget, message):
     submit(app, city=city, category=category, budget=budget)
     assert len(app.subheader) == 0
     assert any(message in item.value for item in app.warning)
+    assert not any("подрядчик(ов)" in item.value for item in app.warning)
 
 
 def test_synthetic_profile_is_visibly_marked(app):
