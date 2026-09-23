@@ -94,7 +94,8 @@ def show_result(result, request: Request, profiles, use_ai: bool, prepared_expla
             explanations, mode = build_explanations(result, request, use_ai=use_ai)
         except Exception:
             # The selection must remain usable when the optional explanation service fails.
-            explanations, mode = build_explanations(result, request, use_ai=False)
+            explanations, _ = build_explanations(result, request, use_ai=False)
+            mode = "fallback" if use_ai else "local"
 
     if result.eligible_count == 1:
         summary = f"Найден 1 подходящий подрядчик на {request.date:%d.%m.%Y}."
@@ -106,15 +107,27 @@ def show_result(result, request: Request, profiles, use_ai: bool, prepared_expla
             f"подрядчиков на {request.date:%d.%m.%Y}."
         )
     st.success(summary)
-    mode_label = {
-        "ai": "AI",
-        "openai": "AI",
-        "local": "локальные",
-        "fallback": "локальные (ответ AI не использован)",
-    }.get(str(mode).lower(), "локальные")
-    st.caption(
-        f"Объяснения: {mode_label}. Состав и порядок определены проверяемыми правилами отбора."
-    )
+    if mode == "ai":
+        local_explanations, _ = build_explanations(result, request, use_ai=False)
+        changed = sum(
+            explanations.get(card.id) != local_explanations.get(card.id)
+            for card in result.cards
+        )
+        if changed:
+            source_note = (
+                f"AI ответил и выбрал фрагменты описаний. Для {changed} из "
+                f"{len(result.cards)} карточек выбор отличается от локального."
+            )
+        else:
+            source_note = (
+                "AI ответил, но выбрал те же фрагменты, что и локальный режим; "
+                "поэтому текст карточек совпадает."
+            )
+    elif mode == "fallback":
+        source_note = "Ответ AI не использован: показаны локальные объяснения."
+    else:
+        source_note = "Фрагменты описаний выбраны локально."
+    st.caption(f"{source_note} Состав и порядок определены проверяемыми правилами отбора.")
     for index, profile in enumerate(result.cards, start=1):
         with st.container(border=True):
             st.subheader(f"{index}. {profile.anon_name}")
@@ -419,6 +432,8 @@ def main() -> None:
                     "профилей, категория, формат и указанный язык. Имя подрядчика, "
                     "цена, выбранная дата и календарь занятости не передаются."
                 )
+            else:
+                st.caption("AI-режим доступен после настройки ключа; подбор работает локально.")
             submitted = st.button("Подобрать подрядчиков  →", type="primary", use_container_width=True, key="submit_match")
             st.caption("Цена указана «от». Отметка о свободной дате в каталоге не является подтверждением бронирования.")
 
@@ -468,7 +483,10 @@ def main() -> None:
                     try:
                         explanation_bundle = build_explanations(result, request, use_ai=use_ai)
                     except Exception:
-                        explanation_bundle = build_explanations(result, request, use_ai=False)
+                        local_explanations, _ = build_explanations(result, request, use_ai=False)
+                        explanation_bundle = (
+                            local_explanations, "fallback" if use_ai else "local"
+                        )
                 st.session_state["saved_match"] = {
                     "signature": signature, "request": request, "result": result,
                     "use_ai": use_ai, "explanations": explanation_bundle,

@@ -72,7 +72,86 @@ def test_ai_with_local_key_requires_explicit_opt_in(monkeypatch, tmp_path):
 
     ai_app.button[0].click().run()
     assert not ai_app.exception
-    assert any("Объяснения: локальные." in item.value for item in ai_app.caption)
+    assert any("Фрагменты описаний выбраны локально." in item.value for item in ai_app.caption)
+
+
+def test_ai_success_with_same_evidence_is_explained(monkeypatch, tmp_path):
+    import config
+    import explanations
+
+    local_env = tmp_path / ".env"
+    local_env.write_text("OPENAI_API_KEY=fake-test-key\n")
+    monkeypatch.setattr(config, "LOCAL_ENV", local_env)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        explanations,
+        "_ai_evidence",
+        lambda cards, request: {
+            card.id: explanations._local_evidence(card, cards) for card in cards
+        },
+    )
+
+    ai_app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    next(item for item in ai_app.checkbox if "AI" in item.label).set_value(True)
+    ai_app.button[0].click().run()
+
+    assert not ai_app.exception
+    assert any(
+        "AI ответил, но выбрал те же фрагменты" in item.value
+        for item in ai_app.caption
+    )
+
+
+def test_ai_success_with_different_evidence_is_explained(monkeypatch, tmp_path):
+    import config
+    import explanations
+
+    local_env = tmp_path / ".env"
+    local_env.write_text("OPENAI_API_KEY=fake-test-key\n")
+    monkeypatch.setattr(config, "LOCAL_ENV", local_env)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def select_first_option(cards, request):
+        return {
+            card.id: explanations._ai_choices(card, cards, request)[0]
+            for card in cards
+        }
+
+    monkeypatch.setattr(explanations, "_ai_evidence", select_first_option)
+    ai_app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    ai_app.date_input[0].set_value(date(2026, 10, 11))
+    next(item for item in ai_app.checkbox if "AI" in item.label).set_value(True)
+    ai_app.button[0].click().run()
+
+    assert not ai_app.exception
+    assert any(
+        "Для 1 из 3 карточек выбор отличается от локального" in item.value
+        for item in ai_app.caption
+    )
+
+
+def test_ai_fallback_is_visible(monkeypatch, tmp_path):
+    import config
+    import explanations
+
+    local_env = tmp_path / ".env"
+    local_env.write_text("OPENAI_API_KEY=fake-test-key\n")
+    monkeypatch.setattr(config, "LOCAL_ENV", local_env)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def unavailable(*_args):
+        raise TimeoutError("simulated API timeout")
+
+    monkeypatch.setattr(explanations, "_ai_evidence", unavailable)
+    ai_app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    next(item for item in ai_app.checkbox if "AI" in item.label).set_value(True)
+    ai_app.button[0].click().run()
+
+    assert not ai_app.exception
+    assert any(
+        "Ответ AI не использован: показаны локальные объяснения" in item.value
+        for item in ai_app.caption
+    )
 
 
 def test_sparse_result(app):
